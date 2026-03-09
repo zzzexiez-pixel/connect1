@@ -5,6 +5,13 @@ placeholder:
   # PlaceholderAPI value that returns "true"/"false"
   is-linked: "%discordsrv_user_islinked%"
 
+verification:
+  # Если true — использовать наличие игрока в /simplewhitelist list (системный whitelist сервера)
+  # как признак верификации вместо placeholder.is-linked.
+  use-simplewhitelist-list: false
+  # Кэш результата проверки в миллисекундах.
+  simplewhitelist-cache-ms: 30000
+
 playtime:
   # Через сколько часов игры начать напоминания
   requirement-hours: 3

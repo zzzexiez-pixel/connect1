@@ -36,11 +36,15 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
     private final Map<UUID, BukkitTask> actionBarTasks = new ConcurrentHashMap<>();
     private final Map<UUID, BukkitTask> noticeTasks = new ConcurrentHashMap<>();
     private final Map<UUID, PlayerVerificationRecord> verificationDb = new ConcurrentHashMap<>();
+    private final Map<UUID, Boolean> simpleWhitelistCache = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> simpleWhitelistCacheTime = new ConcurrentHashMap<>();
 
     private File dbFile;
     private YamlConfiguration dbConfig;
 
     private String placeholderIsLinked;
+    private boolean useSimpleWhitelistList;
+    private long simpleWhitelistCacheMs;
     private Duration playtimeRequirement;
     private long actionBarPeriodTicks;
     private long noticePeriodTicks;
@@ -265,6 +269,9 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
     }
 
     private boolean isLinked(Player player) {
+        if (useSimpleWhitelistList) {
+            return isLinkedViaSimpleWhitelist(player);
+        }
         String value = PlaceholderAPI.setPlaceholders(player, placeholderIsLinked);
         String normalized = normalizePlaceholderValue(value);
         if (normalized.isEmpty()) {
@@ -285,6 +292,24 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
             return verified;
         }
         return false;
+    }
+
+    private boolean isLinkedViaSimpleWhitelist(Player player) {
+        UUID uuid = player.getUniqueId();
+        long now = System.currentTimeMillis();
+        Long cachedAt = simpleWhitelistCacheTime.get(uuid);
+        if (cachedAt != null && now - cachedAt < simpleWhitelistCacheMs) {
+            return simpleWhitelistCache.getOrDefault(uuid, false);
+        }
+
+        boolean linked = Bukkit.getWhitelistedPlayers().stream()
+                .anyMatch(offline -> offline.getUniqueId().equals(uuid));
+        simpleWhitelistCache.put(uuid, linked);
+        simpleWhitelistCacheTime.put(uuid, now);
+        if (linked) {
+            updateVerificationStatus(player, true);
+        }
+        return linked;
     }
 
     private boolean isEligible(Player player) {
@@ -326,6 +351,8 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
 
     private void loadSettings() {
         placeholderIsLinked = getConfig().getString("placeholder.is-linked", "%discordsrv_user_islinked%");
+        useSimpleWhitelistList = getConfig().getBoolean("verification.use-simplewhitelist-list", false);
+        simpleWhitelistCacheMs = getConfig().getLong("verification.simplewhitelist-cache-ms", 30000L);
         playtimeRequirement = Duration.ofHours(getConfig().getLong("playtime.requirement-hours", 48));
         actionBarPeriodTicks = getConfig().getLong("actionbar.interval-ticks", 40L);
         noticePeriodTicks = getConfig().getLong("notice.interval-ticks", 1200L);
