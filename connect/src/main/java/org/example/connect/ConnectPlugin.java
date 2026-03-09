@@ -181,7 +181,11 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
                     continue;
                 }
 
-                String nick = getSafePlayerName(offlinePlayer);
+                String nick = getCommandTargetName(offlinePlayer, record);
+                if (nick == null) {
+                    skipped++;
+                    continue;
+                }
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
                         "fine add " + nick + " KooT_ 64 1w Да Автоматический штраф. Неверификация аккаунта.");
                 record.fineIssuedAt = System.currentTimeMillis();
@@ -307,14 +311,34 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
             return simpleWhitelistCache.getOrDefault(uuid, false);
         }
 
-        boolean linked = Bukkit.getWhitelistedPlayers().stream()
-                .anyMatch(offline -> offline.getUniqueId().equals(uuid));
+        boolean linked = isPresentInSimpleWhitelist(player);
         simpleWhitelistCache.put(uuid, linked);
         simpleWhitelistCacheTime.put(uuid, now);
         if (linked) {
             updateVerificationStatus(player, true);
         }
         return linked;
+    }
+
+    private boolean isPresentInSimpleWhitelist(Player player) {
+        Collection<org.bukkit.OfflinePlayer> simpleWhitelistPlayers = loadSimpleWhitelistPlayers();
+        if (simpleWhitelistPlayers.isEmpty()) {
+            return false;
+        }
+
+        UUID uuid = player.getUniqueId();
+        String playerName = player.getName();
+        for (org.bukkit.OfflinePlayer whitelistPlayer : simpleWhitelistPlayers) {
+            UUID whitelistUuid = whitelistPlayer.getUniqueId();
+            if (whitelistUuid != null && whitelistUuid.equals(uuid)) {
+                return true;
+            }
+            String whitelistName = whitelistPlayer.getName();
+            if (playerName != null && whitelistName != null && whitelistName.equalsIgnoreCase(playerName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isEligible(Player player) {
@@ -505,6 +529,17 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
             return player.getUniqueId().toString();
         }
         return name;
+    }
+
+    private String getCommandTargetName(org.bukkit.OfflinePlayer player, PlayerVerificationRecord record) {
+        String liveName = player.getName();
+        if (liveName != null && !liveName.isBlank()) {
+            return liveName;
+        }
+        if (record.playerName != null && !record.playerName.isBlank()) {
+            return record.playerName;
+        }
+        return null;
     }
 
     private Collection<org.bukkit.OfflinePlayer> getFineTargets() {
