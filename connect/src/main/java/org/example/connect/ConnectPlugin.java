@@ -22,8 +22,12 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -44,6 +48,7 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
 
     private String placeholderIsLinked;
     private boolean useSimpleWhitelistList;
+    private String simpleWhitelistFilePath;
     private long simpleWhitelistCacheMs;
     private Duration playtimeRequirement;
     private long actionBarPeriodTicks;
@@ -140,7 +145,7 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
             int skipped = 0;
             long deadline = Instant.now().minus(7, ChronoUnit.DAYS).toEpochMilli();
 
-            for (org.bukkit.OfflinePlayer offlinePlayer : Bukkit.getWhitelistedPlayers()) {
+            for (org.bukkit.OfflinePlayer offlinePlayer : getFineTargets()) {
                 checked++;
                 UUID uuid = offlinePlayer.getUniqueId();
                 PlayerVerificationRecord record = verificationDb.computeIfAbsent(uuid,
@@ -352,6 +357,7 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
     private void loadSettings() {
         placeholderIsLinked = getConfig().getString("placeholder.is-linked", "%discordsrv_user_islinked%");
         useSimpleWhitelistList = getConfig().getBoolean("verification.use-simplewhitelist-list", false);
+        simpleWhitelistFilePath = getConfig().getString("verification.simplewhitelist-file", "../SimpleWhitelist/whitelist.yml");
         simpleWhitelistCacheMs = getConfig().getLong("verification.simplewhitelist-cache-ms", 30000L);
         playtimeRequirement = Duration.ofHours(getConfig().getLong("playtime.requirement-hours", 48));
         actionBarPeriodTicks = getConfig().getLong("actionbar.interval-ticks", 40L);
@@ -499,6 +505,64 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
             return player.getUniqueId().toString();
         }
         return name;
+    }
+
+    private Collection<org.bukkit.OfflinePlayer> getFineTargets() {
+        Collection<org.bukkit.OfflinePlayer> fromSimpleWhitelist = loadSimpleWhitelistPlayers();
+        if (!fromSimpleWhitelist.isEmpty()) {
+            return fromSimpleWhitelist;
+        }
+        return Bukkit.getWhitelistedPlayers();
+    }
+
+    private Collection<org.bukkit.OfflinePlayer> loadSimpleWhitelistPlayers() {
+        if (simpleWhitelistFilePath == null || simpleWhitelistFilePath.isBlank()) {
+            return List.of();
+        }
+
+        File whitelistFile = new File(getDataFolder(), simpleWhitelistFilePath);
+        if (!whitelistFile.exists()) {
+            return List.of();
+        }
+
+        YamlConfiguration whitelistConfig = YamlConfiguration.loadConfiguration(whitelistFile);
+        Set<org.bukkit.OfflinePlayer> players = new HashSet<>();
+        addSimpleWhitelistEntries(players, whitelistConfig.getList("players", List.of()));
+        addSimpleWhitelistEntries(players, whitelistConfig.getList("whitelist", List.of()));
+
+        if (whitelistConfig.isConfigurationSection("players")) {
+            addSimpleWhitelistEntries(players, whitelistConfig.getConfigurationSection("players").getKeys(false));
+        }
+        if (whitelistConfig.isConfigurationSection("whitelist")) {
+            addSimpleWhitelistEntries(players, whitelistConfig.getConfigurationSection("whitelist").getKeys(false));
+        }
+
+        return new ArrayList<>(players);
+    }
+
+    private void addSimpleWhitelistEntries(Set<org.bukkit.OfflinePlayer> target, Collection<?> entries) {
+        for (Object rawEntry : entries) {
+            if (rawEntry == null) {
+                continue;
+            }
+            String value = String.valueOf(rawEntry).trim();
+            if (value.isEmpty()) {
+                continue;
+            }
+            org.bukkit.OfflinePlayer player = parseOfflinePlayer(value);
+            if (player != null) {
+                target.add(player);
+            }
+        }
+    }
+
+    private org.bukkit.OfflinePlayer parseOfflinePlayer(String value) {
+        try {
+            UUID uuid = UUID.fromString(value);
+            return Bukkit.getOfflinePlayer(uuid);
+        } catch (IllegalArgumentException ignored) {
+            return Bukkit.getOfflinePlayer(value);
+        }
     }
 
     private static final class PlayerVerificationRecord {
