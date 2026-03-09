@@ -9,6 +9,9 @@ verification:
   # Если true — использовать наличие игрока в /simplewhitelist list (системный whitelist сервера)
   # как признак верификации вместо placeholder.is-linked.
   use-simplewhitelist-list: false
+  # Путь к файлу whitelist плагина SimpleWhitelist для /connect fine
+  # (относительно папки plugins/connect).
+  simplewhitelist-file: "../SimpleWhitelist/whitelist.yml"
   # Кэш результата проверки в миллисекундах.
   simplewhitelist-cache-ms: 30000
 
