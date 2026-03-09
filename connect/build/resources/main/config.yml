@@ -1,0 +1,48 @@
+﻿# Connect plugin configuration
+# Цвета поддерживают стандартные Minecraft-коды с & (например, &c, &7).
+
+placeholder:
+  # PlaceholderAPI value that returns "true"/"false"
+  is-linked: "%discordsrv_user_islinked%"
+
+playtime:
+  # Через сколько часов игры начать напоминания
+  requirement-hours: 3
+
+actionbar:
+  enabled: true
+  # Период в тиках (20 тиков = 1 сек)
+  interval-ticks: 40
+  text: "&cВерификация обязательна для игры на сервере!"
+
+notice:
+  enabled: true
+  # Период в тиках (20 тиков = 1 сек)
+  interval-ticks: 1200
+
+  title:
+    enabled: true
+    text: "&cПривяжите аккаунт к дискорду!"
+    fade-in-ms: 250
+    stay-ms: 2000
+    fade-out-ms: 250
+
+  subtitle:
+    enabled: false
+    text: ""
+
+  chat:
+    enabled: true
+    text: "&7Команда /v - чтобы привязать аккаунт"
+
+behavior:
+  # Останавливать все задачи, когда аккаунт уже привязан
+  stop-tasks-when-linked: true
+  # Права для обхода проверок
+  bypass-permission: "connect.bypass"
+
+worlds:
+  # Если true — работать только в мирах из списка
+  # Если false — работать во всех мирах, кроме списка
+  use-whitelist: false
+  list: []
