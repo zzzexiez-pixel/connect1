@@ -5,12 +5,16 @@ api-version: "1.21"
 depend: [PlaceholderAPI]
 commands:
   connect:
-    description: Reload Connect plugin config.
-    usage: /connect reload
+    description: Connect plugin commands.
+    usage: /connect reload|fine
 permissions:
   connect.bypass:
     description: Disable Discord verification reminders for the player.
     default: false
   connect.reload:
     description: Reload Connect plugin config.
+    default: op
+
+  connect.fine:
+    description: Run verification fine wave for whitelist players.
     default: op

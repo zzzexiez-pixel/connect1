@@ -20,7 +20,10 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import java.io.File;
 import java.io.IOException;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -32,7 +35,7 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
 
     private final Map<UUID, BukkitTask> actionBarTasks = new ConcurrentHashMap<>();
     private final Map<UUID, BukkitTask> noticeTasks = new ConcurrentHashMap<>();
-    private final Map<UUID, Boolean> verificationDb = new ConcurrentHashMap<>();
+    private final Map<UUID, PlayerVerificationRecord> verificationDb = new ConcurrentHashMap<>();
 
     private File dbFile;
     private YamlConfiguration dbConfig;
@@ -122,7 +125,65 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
             sender.sendMessage("Connect reloaded.");
             return true;
         }
-        sender.sendMessage("Usage: /connect reload");
+
+        if (args.length == 1 && "fine".equalsIgnoreCase(args[0])) {
+            if (!sender.hasPermission("connect.fine")) {
+                sender.sendMessage("No permission.");
+                return true;
+            }
+            int checked = 0;
+            int fined = 0;
+            int skipped = 0;
+            long deadline = Instant.now().minus(7, ChronoUnit.DAYS).toEpochMilli();
+
+            for (org.bukkit.OfflinePlayer offlinePlayer : Bukkit.getWhitelistedPlayers()) {
+                checked++;
+                UUID uuid = offlinePlayer.getUniqueId();
+                PlayerVerificationRecord record = verificationDb.computeIfAbsent(uuid,
+                        ignored -> new PlayerVerificationRecord(getSafePlayerName(offlinePlayer), false));
+
+                if (record.playerName == null || record.playerName.isBlank()) {
+                    record.playerName = getSafePlayerName(offlinePlayer);
+                }
+
+                if (offlinePlayer.isBanned()) {
+                    skipped++;
+                    continue;
+                }
+
+                if (record.hasBypassPermission || hasLiveBypassPermission(offlinePlayer)) {
+                    skipped++;
+                    continue;
+                }
+
+                if (record.verified) {
+                    skipped++;
+                    continue;
+                }
+
+                if (record.fineIssuedAt > 0) {
+                    skipped++;
+                    continue;
+                }
+
+                long lastSeen = offlinePlayer.getLastSeen();
+                if (lastSeen <= 0 || lastSeen > deadline) {
+                    skipped++;
+                    continue;
+                }
+
+                String nick = getSafePlayerName(offlinePlayer);
+                Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
+                        "fine add " + nick + " KooT_ 64 1w Да Автоматический штраф. Неверификация аккаунта.");
+                record.fineIssuedAt = System.currentTimeMillis();
+                fined++;
+            }
+            saveVerificationDb();
+            sender.sendMessage("Connect fine wave done. Checked: " + checked + ", fined: " + fined + ", skipped: " + skipped + ".");
+            return true;
+        }
+
+        sender.sendMessage("Usage: /connect reload | /connect fine");
         return true;
     }
 
@@ -312,9 +373,23 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
         for (Map.Entry<String, Object> entry : players.entrySet()) {
             try {
                 UUID uuid = UUID.fromString(entry.getKey());
-                boolean verified = Boolean.TRUE.equals(entry.getValue())
-                        || "true".equalsIgnoreCase(String.valueOf(entry.getValue()));
-                verificationDb.put(uuid, verified);
+                Object raw = entry.getValue();
+                PlayerVerificationRecord record;
+                if (raw instanceof Boolean) {
+                    record = new PlayerVerificationRecord(null, (Boolean) raw);
+                } else if (raw instanceof org.bukkit.configuration.ConfigurationSection section) {
+                    record = new PlayerVerificationRecord(
+                            section.getString("name", null),
+                            section.getBoolean("verified", false)
+                    );
+                    record.lastUpdated = section.getLong("last-updated", 0L);
+                    record.hasBypassPermission = section.getBoolean("bypass", false);
+                    record.fineIssuedAt = section.getLong("fine-issued-at", 0L);
+                } else {
+                    boolean verified = "true".equalsIgnoreCase(String.valueOf(raw));
+                    record = new PlayerVerificationRecord(null, verified);
+                }
+                verificationDb.put(uuid, record);
             } catch (IllegalArgumentException ignored) {
                 // skip invalid UUIDs
             }
@@ -326,8 +401,15 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
             return;
         }
         Map<String, Object> players = new HashMap<>();
-        for (Map.Entry<UUID, Boolean> entry : verificationDb.entrySet()) {
-            players.put(entry.getKey().toString(), entry.getValue());
+        for (Map.Entry<UUID, PlayerVerificationRecord> entry : verificationDb.entrySet()) {
+            PlayerVerificationRecord record = entry.getValue();
+            Map<String, Object> serialized = new LinkedHashMap<>();
+            serialized.put("name", record.playerName);
+            serialized.put("verified", record.verified);
+            serialized.put("last-updated", record.lastUpdated);
+            serialized.put("bypass", record.hasBypassPermission);
+            serialized.put("fine-issued-at", record.fineIssuedAt);
+            players.put(entry.getKey().toString(), serialized);
         }
         dbConfig.set("players", players);
         try {
@@ -339,9 +421,72 @@ public final class ConnectPlugin extends JavaPlugin implements Listener {
 
     private void updateVerificationStatus(Player player, boolean verified) {
         UUID uuid = player.getUniqueId();
-        Boolean previous = verificationDb.put(uuid, verified);
-        if (previous == null || previous != verified) {
+        PlayerVerificationRecord record = verificationDb.get(uuid);
+        if (record == null) {
+            record = new PlayerVerificationRecord(player.getName(), verified);
+        }
+
+        String oldName = record.playerName;
+        boolean oldVerified = record.verified;
+        boolean oldBypass = record.hasBypassPermission;
+
+        record.playerName = player.getName();
+        record.verified = verified;
+        record.lastUpdated = System.currentTimeMillis();
+        record.hasBypassPermission = bypassPermission != null
+                && !bypassPermission.isBlank()
+                && player.hasPermission(bypassPermission);
+        if (verified) {
+            record.fineIssuedAt = 0L;
+        }
+
+        verificationDb.put(uuid, record);
+        boolean changed = oldVerified != record.verified
+                || oldBypass != record.hasBypassPermission
+                || !safeEquals(oldName, record.playerName);
+        if (changed) {
             saveVerificationDb();
+        }
+    }
+
+    private boolean safeEquals(String left, String right) {
+        if (left == null) {
+            return right == null;
+        }
+        return left.equals(right);
+    }
+
+    private boolean hasLiveBypassPermission(org.bukkit.OfflinePlayer offlinePlayer) {
+        if (bypassPermission == null || bypassPermission.isBlank()) {
+            return false;
+        }
+        if (offlinePlayer.isOnline() && offlinePlayer.getPlayer() != null) {
+            return offlinePlayer.getPlayer().hasPermission(bypassPermission);
+        }
+        return false;
+    }
+
+    private String getSafePlayerName(org.bukkit.OfflinePlayer player) {
+        String name = player.getName();
+        if (name == null || name.isBlank()) {
+            return player.getUniqueId().toString();
+        }
+        return name;
+    }
+
+    private static final class PlayerVerificationRecord {
+        private String playerName;
+        private boolean verified;
+        private long lastUpdated;
+        private boolean hasBypassPermission;
+        private long fineIssuedAt;
+
+        private PlayerVerificationRecord(String playerName, boolean verified) {
+            this.playerName = playerName;
+            this.verified = verified;
+            this.lastUpdated = System.currentTimeMillis();
+            this.hasBypassPermission = false;
+            this.fineIssuedAt = 0L;
         }
     }
 }
